@@ -45,7 +45,11 @@ I2C_HandleTypeDef hi2c1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+uint8_t programState = 0;
+const uint8_t maxProgramState = 1;
 
+const uint8_t SSD1306SlaveAddressWriteMode = 0x78;
+const uint8_t SSD1306SlaveAddressReadMode = 0x79;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -54,7 +58,16 @@ static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
-
+void writeSSD1306Commands(uint8_t commands[], uint8_t commandsLength, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
+void writeSSD1306Data(uint8_t data[], uint8_t dataLength, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
+void initializeScreen(uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
+void testScreen(uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
+void eraseScreen(uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
+void fillScreen(uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
+void drawText(char message[], uint8_t messageLength, uint8_t fontSize, uint8_t topLeftXCoordinate, uint8_t topLeftYCoordiante, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
+//void drawBitmap(uint8_t* bitMap, uint8_t bitMapLength, uint8_t bitMapHeight, uint8_t topLeftXCoordinate, uint8_t topLeftYCoordinate);
+//void drawLine(uint8_t point1Coordinates[], uint8_t point2Coordinates[]);
+//void drawPolygon(uint8_t xCoordinates[], uint8_t yCoordinates[], uint8_t numberOfPoints);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -94,7 +107,8 @@ int main(void)
   MX_USART2_UART_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-
+  initializeScreen(SSD1306SlaveAddressWriteMode, &hi2c1);
+  testScreen(SSD1306SlaveAddressWriteMode, &hi2c1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -104,6 +118,15 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+	if(programState == 0) {
+		eraseScreen(SSD1306SlaveAddressWriteMode, &hi2c1);
+	}
+
+	if(programState == 1) {
+		fillScreen(SSD1306SlaveAddressWriteMode, &hi2c1);
+	}
+
+	HAL_Delay(100);
   }
   /* USER CODE END 3 */
 }
@@ -265,6 +288,401 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIOPin) {
+	if(GPIOPin != B1_Pin) {
+		__NOP();
+		return;
+	}
+
+	HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+	if(programState >= maxProgramState) {
+		programState = 0;
+		return;
+	}
+
+	programState += 1;
+}
+
+// OLED Screen Controller Functions
+//void writeSSD1306Commands(uint8_t commandsList[], uint8_t commandsListLength, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandlerReference) {
+//	uint8_t buffer[commandsListLength + 1];
+//
+//	buffer[0] = 0x00;
+//	for(int commandsListIndex = 0; commandsListIndex < commandsListLength; commandsListIndex++){
+//		buffer[commandsListIndex + 1] = commandsList[commandsListIndex];
+//	}
+//
+//	HAL_I2C_Master_Transmit(I2CHandlerReference, slaveAddress, buffer, commandsListLength + 1, HAL_MAX_DELAY);
+//}
+void writeSSD1306Commands(uint8_t commands[], uint8_t commandsLength, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler) {
+	uint8_t buffer[commandsLength + 1];
+	buffer[0] = 0x00;
+
+	for (int i = 0; i < commandsLength; i++) {
+		buffer[i + 1] = commands[i];
+	}
+
+	HAL_I2C_Master_Transmit(I2CHandler, slaveAddress, buffer, commandsLength + 1, HAL_MAX_DELAY);
+}
+
+void writeSSD1306Data(uint8_t data[], uint8_t dataLength, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler) {
+	uint8_t buffer[dataLength + 1];
+	buffer[0] = 0x40;
+
+	for (int i = 0; i < dataLength; i++) {
+		buffer[i + 1] = data[i];
+	}
+
+	HAL_I2C_Master_Transmit(I2CHandler, slaveAddress, buffer, dataLength + 1, HAL_MAX_DELAY);
+}
+
+void initializeScreen(uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler) {
+	uint8_t initializerCommands[] = {
+		0xAE,       // Display OFF
+		0x20, 0x00, // Set Memory Addressing Mode to Horizontal
+		0xA1,       // Segment re-map (column address 127 is mapped to SEG0)
+		0xC8,       // COM Output Scan Direction: re-mapped mode
+		0xA8, 0x3F, // Multiplex Ratio: 0x3F = 63
+		0xD3, 0x00, // Display Offset: 0
+		0xDA, 0x12, // COM Pins Hardware Configuration
+		0x81, 0x7F, // Contrast
+		0xA4,       // Display follows RAM content
+		0xA6,       // Normal (not inverted) display
+		0xD5, 0x80, // Display clock divide ratio
+		0x8D, 0x14, // Charge Pump
+		0xAF        // Display ON
+	};
+
+	writeSSD1306Commands(initializerCommands, 21, slaveAddress, I2CHandler);
+	eraseScreen(slaveAddress, I2CHandler);
+}
+
+void testScreen(uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler) {
+	uint8_t entireScreenOnCommand = 0xA5;
+	uint8_t resumeRAMContentsCommand = 0xA4;
+	writeSSD1306Commands(&entireScreenOnCommand, 1, slaveAddress, I2CHandler);
+	HAL_Delay(300);
+	writeSSD1306Commands(&resumeRAMContentsCommand, 1, slaveAddress, I2CHandler);
+	HAL_Delay(300);
+}
+
+void eraseScreen(uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler) {
+	uint8_t columnsAndPagesSetupCommands[] = {
+		0x21,
+		0x00, 0x7F,
+		0x22,
+		0x00, 0x07
+	};
+	writeSSD1306Commands(columnsAndPagesSetupCommands, 6, slaveAddress, I2CHandler);
+
+	uint8_t blankBitMap[128];
+	for(int i = 0; i < 128; i++) {
+		blankBitMap[i] = 0x00;
+	}
+
+	for(int page = 0; page <= 0x07; page++) {
+		writeSSD1306Data(blankBitMap, 128, slaveAddress, I2CHandler);
+	}
+}
+
+void fillScreen(uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler) {
+	uint8_t columnsAndPagesSetupCommands[] = {
+		0x21,
+		0x00, 0x7F,
+		0x22,
+		0x00, 0x07
+	};
+	writeSSD1306Commands(columnsAndPagesSetupCommands, 6, slaveAddress, I2CHandler);
+
+	uint8_t fullBitMap[128];
+	for(int i = 0; i < 128; i++) {
+		fullBitMap[i] = 0xFF;
+	}
+
+	for(int page = 0; page <= 0x07; page++) {
+		writeSSD1306Data(fullBitMap, 128, slaveAddress, I2CHandler);
+	}
+}
+
+void drawText(char message[], uint8_t messageLength, uint8_t fontSize, uint8_t topLeftXCoordinate, uint8_t topLeftYCoordiante, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler) {
+	uint8_t characterBitMaps[27][8] = {
+		{	// A
+			0b00000000,
+			0b11111100,
+			0b11111110,
+			0b00110011,
+			0b00110011,
+			0b11111110,
+			0b11111100,
+			0b00000000
+		},
+		{	// B
+			0b00000000,
+			0b11111111,
+			0b11111111,
+			0b10011001,
+			0b10011001,
+			0b01100110,
+			0b01100110,
+			0b00000000
+		},
+		{	// C
+			0b00000000,
+			0b00111100,
+			0b01111110,
+			0b11000011,
+			0b11000011,
+			0b11000011,
+			0b01100110,
+			0b00000000
+		},
+		{	// D
+			0b00000000,
+			0b11111111,
+			0b11111111,
+			0b11000011,
+			0b11000011,
+			0b01111110,
+			0b00111100,
+			0b00000000
+		},
+		{	// E
+			0b00000000,
+			0b11111111,
+			0b11111111,
+			0b10011001,
+			0b10011001,
+			0b10011001,
+			0b00000000,
+			0b00000000
+		},
+		{	// F
+			0b00000000,
+			0b00000000,
+			0b11111111,
+			0b11111111,
+			0b00110011,
+			0b00110011,
+			0b00000000,
+			0b00000000
+		},
+		{	// G
+			0b00000000,
+			0b01111100,
+			0b11111110,
+			0b11000011,
+			0b11010011,
+			0b11110011,
+			0b01110010,
+			0b00000000
+		},
+		{	// H
+			0b00000000,
+			0b11111111,
+			0b11111111,
+			0b00011000,
+			0b00011000,
+			0b11111111,
+			0b11111111,
+			0b00000000
+		},
+		{	// I
+			0b00000000,
+			0b11000011,
+			0b11000011,
+			0b11111111,
+			0b11111111,
+			0b11000011,
+			0b11000011,
+			0b00000000
+		},
+		{	// J
+			0b00000000,
+			0b01100011,
+			0b11000011,
+			0b11111111,
+			0b01111111,
+			0b00000011,
+			0b00000011,
+			0b00000000
+		},
+		{	// K
+			0b00000000,
+			0b11111111,
+			0b11111111,
+			0b00011000,
+			0b00111100,
+			0b01100110,
+			0b11000011,
+			0b00000000
+		},
+		{	// L
+			0b00000000,
+			0b11111111,
+			0b11111111,
+			0b11000000,
+			0b11000000,
+			0b11000000,
+			0b00000000,
+			0b00000000
+		},
+		{	// M
+			0b00000000,
+			0b11111110,
+			0b11111110,
+			0b00001100,
+			0b00011000,
+			0b00001100,
+			0b11111110,
+			0b11111110
+		},
+		{	// N
+			0b00000000,
+			0b11111110,
+			0b11111110,
+			0b00001100,
+			0b00011000,
+			0b00110000,
+			0b11111110,
+			0b11111110
+		},
+		{	// O
+			0b00000000,
+			0b01111100,
+			0b11000110,
+			0b10000010,
+			0b10000010,
+			0b11000110,
+			0b01111100,
+			0b00000000
+		},
+		{	// P
+			0b00000000,
+			0b11111111,
+			0b11111111,
+			0b00001001,
+			0b00001001,
+			0b00001111,
+			0b00000110,
+			0b00000000
+		},
+		{	// Q
+			0b00000000,
+			0b01111100,
+			0b10000010,
+			0b10000010,
+			0b10010010,
+			0b10100010,
+			0b01111100,
+			0b10000000
+		},
+		{	// R
+			0b00000000,
+			0b11111111,
+			0b11111111,
+			0b00011001,
+			0b00111001,
+			0b11100110,
+			0b00000000,
+			0b00000000
+		},
+		{	// S
+			0b00000000,
+			0b10011111,
+			0b10011111,
+			0b10011001,
+			0b10011001,
+			0b11111001,
+			0b11111001,
+			0b00000000
+		},
+		{	// T
+			0b00000000,
+			0b00000011,
+			0b00000011,
+			0b11111111,
+			0b11111111,
+			0b00000011,
+			0b00000011,
+			0b00000000
+		},
+		{	// U
+			0b00000000,
+			0b00111111,
+			0b11111111,
+			0b11000000,
+			0b11000000,
+			0b11111111,
+			0b00111111,
+			0b00000000
+		},
+		{	// V
+			0b00000000,
+			0b00011110,
+			0b01111000,
+			0b11000000,
+			0b11000000,
+			0b01111000,
+			0b00011110,
+			0b00000000
+		},
+		{	// W
+			0b00000000,
+			0b01111110,
+			0b11100000,
+			0b01111000,
+			0b01111000,
+			0b11100000,
+			0b01111110,
+			0b00000000
+		},
+		{	// X
+			0b00000000,
+			0b11000110,
+			0b01101100,
+			0b00111000,
+			0b00111000,
+			0b01101100,
+			0b11000110,
+			0b00000000
+		},
+		{	// Y
+			0b00000000,
+			0b00000111,
+			0b00001110,
+			0b11111000,
+			0b11111000,
+			0b00001110,
+			0b00000111,
+			0b00000000
+		},
+		{	// Z
+			0b00000000,
+			0b11000011,
+			0b11100011,
+			0b11110011,
+			0b11011011,
+			0b11001111,
+			0b11000111,
+			0b00000000
+		},
+		{	// SPACE
+			0b00000000,
+			0b00000000,
+			0b00000000,
+			0b00000000,
+			0b00000000,
+			0b00000000,
+			0b00000000,
+			0b00000000
+		}
+	};
+
+
+}
+//void drawBitmap(uint8_t* bitMap, uint8_t bitMapLength, uint8_t bitMapHeight, uint8_t topLeftXCoordinate, uint8_t topLeftYCoordinate) {}
+//void drawLine(uint8_t point1Coordinates[], uint8_t point2Coordinates[]) {}
+//void drawPolygon(uint8_t xCoordinates[], uint8_t yCoordinates[], uint8_t numberOfPoints) {}
 
 /* USER CODE END 4 */
 
