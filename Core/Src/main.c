@@ -46,7 +46,7 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 uint8_t programState = 0;
-const uint8_t maxProgramState = 1;
+const uint8_t maxProgramState = 2;
 
 const uint8_t SSD1306SlaveAddressWriteMode = 0x78;
 const uint8_t SSD1306SlaveAddressReadMode = 0x79;
@@ -64,7 +64,7 @@ void initializeScreen(uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
 void testScreen(uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
 void eraseScreen(uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
 void fillScreen(uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
-void drawText(char message[], uint8_t messageLength, uint8_t fontSize, uint8_t topLeftXCoordinate, uint8_t topLeftYCoordiante, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
+void drawText(char message[], uint8_t messageLengthInCharacters, uint8_t fontSize, uint8_t topLeftXCoordinate, uint8_t topLeftYCoordiante, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
 //void drawBitmap(uint8_t* bitMap, uint8_t bitMapLength, uint8_t bitMapHeight, uint8_t topLeftXCoordinate, uint8_t topLeftYCoordinate);
 //void drawLine(uint8_t point1Coordinates[], uint8_t point2Coordinates[]);
 //void drawPolygon(uint8_t xCoordinates[], uint8_t yCoordinates[], uint8_t numberOfPoints);
@@ -124,6 +124,14 @@ int main(void)
 
 	if(programState == 1) {
 		fillScreen(SSD1306SlaveAddressWriteMode, &hi2c1);
+		HAL_Delay(300);
+		eraseScreen(SSD1306SlaveAddressWriteMode, &hi2c1);
+		HAL_Delay(300);
+	}
+
+	if(programState == 2) {
+		char testMessage[] = "ABC DEF GHI JKL MNO PQR STU VWX YZ";
+		drawText(testMessage, 34, 8, 0, 0, SSD1306SlaveAddressWriteMode, &hi2c1);
 	}
 
 	HAL_Delay(100);
@@ -294,6 +302,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIOPin) {
 		return;
 	}
 
+	eraseScreen(SSD1306SlaveAddressWriteMode, &hi2c1);
 	HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 	if(programState >= maxProgramState) {
 		programState = 0;
@@ -304,16 +313,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIOPin) {
 }
 
 // OLED Screen Controller Functions
-//void writeSSD1306Commands(uint8_t commandsList[], uint8_t commandsListLength, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandlerReference) {
-//	uint8_t buffer[commandsListLength + 1];
-//
-//	buffer[0] = 0x00;
-//	for(int commandsListIndex = 0; commandsListIndex < commandsListLength; commandsListIndex++){
-//		buffer[commandsListIndex + 1] = commandsList[commandsListIndex];
-//	}
-//
-//	HAL_I2C_Master_Transmit(I2CHandlerReference, slaveAddress, buffer, commandsListLength + 1, HAL_MAX_DELAY);
-//}
 void writeSSD1306Commands(uint8_t commands[], uint8_t commandsLength, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler) {
 	uint8_t buffer[commandsLength + 1];
 	buffer[0] = 0x00;
@@ -404,7 +403,7 @@ void fillScreen(uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler) {
 	}
 }
 
-void drawText(char message[], uint8_t messageLength, uint8_t fontSize, uint8_t topLeftXCoordinate, uint8_t topLeftYCoordiante, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler) {
+void drawText(char message[], uint8_t messageLengthInCharacters, uint8_t fontSize, uint8_t topLeftXCoordinate, uint8_t topLeftYCoordiante, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler) {
 	uint8_t characterBitMaps[27][8] = {
 		{	// A
 			0b00000000,
@@ -678,7 +677,48 @@ void drawText(char message[], uint8_t messageLength, uint8_t fontSize, uint8_t t
 		}
 	};
 
+	// Given message, messageLengthInCharacters, fontSize, topLeftXCoordinate
+	// Find topLeftX2Coordinate // x-coordinate of last character on line.
 
+	uint8_t columnEndCoordinate = 0;
+	if(topLeftXCoordinate + (fontSize*messageLengthInCharacters) > 128) { columnEndCoordinate = 127; }
+	else { columnEndCoordinate = (fontSize * messageLengthInCharacters) - 1; }
+
+	uint8_t charactersPerPage = (columnEndCoordinate - topLeftXCoordinate + 1) / fontSize;
+	uint8_t numberOfPages = (messageLengthInCharacters + charactersPerPage - 1) / charactersPerPage;
+	uint8_t pageEndCoordinate = numberOfPages - 1;
+
+	uint8_t columnsAndPagesSetupCommands[] = {
+		0x21, 		// Set columns starting coordinate.
+		topLeftXCoordinate, columnEndCoordinate,
+		0x22,		// Set pages starting coordinate.
+		topLeftYCoordiante / 8, pageEndCoordinate		// TODO: Add text's ability to go in between pages.
+	};
+
+	writeSSD1306Commands(columnsAndPagesSetupCommands, 6, slaveAddress, I2CHandler);
+
+	for(int page = 0; page < numberOfPages; page++) {
+		uint8_t pageData[columnEndCoordinate - topLeftXCoordinate];
+
+		for(int character = 0; character < charactersPerPage; character++) {
+			if(character + (charactersPerPage * page) >= messageLengthInCharacters) {
+				// Make buffer stop writing without erasing previously existing data.
+				continue;
+			}
+
+			char currentCharacter = message[character + (charactersPerPage * page)];
+			for(int column = 0; column < fontSize; column++) {
+				if(currentCharacter == ' ') {
+					pageData[column + (fontSize * character)] = characterBitMaps[26][column];
+					continue;
+				}
+
+				pageData[column + (fontSize * (character))] = characterBitMaps[currentCharacter - 65][column];
+			}
+		}
+
+		writeSSD1306Data(pageData, columnEndCoordinate - topLeftXCoordinate, slaveAddress, I2CHandler);
+	}
 }
 //void drawBitmap(uint8_t* bitMap, uint8_t bitMapLength, uint8_t bitMapHeight, uint8_t topLeftXCoordinate, uint8_t topLeftYCoordinate) {}
 //void drawLine(uint8_t point1Coordinates[], uint8_t point2Coordinates[]) {}
