@@ -703,6 +703,8 @@ void drawText(char message[], uint8_t messageLengthInCharacters, uint8_t fontSiz
 		for(int character = 0; character < charactersPerPage; character++) {
 			if(character + (charactersPerPage * page) >= messageLengthInCharacters) {
 				// Make buffer stop writing without erasing previously existing data.
+				// Possible fix is to do this looping algorithm for 0 to n-1 lines and then
+				// on last line (line n), write to a different column length with a shorter buffer.
 				continue;
 			}
 
