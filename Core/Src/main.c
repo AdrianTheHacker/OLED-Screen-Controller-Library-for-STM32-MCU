@@ -21,7 +21,6 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,6 +45,7 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 uint8_t programState = 0;
+uint8_t programStateChanging = 0; // 1 When state changing, zero otherwise.
 const uint8_t maxProgramState = 2;
 
 const uint8_t SSD1306SlaveAddressWriteMode = 0x78;
@@ -123,7 +123,6 @@ int main(void)
 	if(programState == 0) {
 		eraseScreen(SSD1306SlaveAddressWriteMode, &hi2c1);
 	}
-//void drawText(char message[], uint8_t messageLengthInCharacters, uint8_t topLeftXCoordinateInCharacters, uint8_t topLeftYCoordinateInCharacters, uint8_t LineLengthInCharacters, uint8_t slaveAddress, I2C_HandleTypeDef* I2CHandler);
 
 	if(programState == 1) {
 		char testMessage[] = "HELLO WORLD";
@@ -145,17 +144,13 @@ int main(void)
 		}
 	}
 
-//	if(programState == 2) {
-//		char testMessage[] = "THIS MIGHT JUSTIFY A LINKEDIN POST";
-//		drawText(testMessage, 34, 8, 0, 0, SSD1306SlaveAddressWriteMode, &hi2c1);
-//	}
-//
-//	if(programState == 3) {
-//		char testMessage[] = "ABC DEF GHI JKL MNO PQR STU VWX YZ";
-//		drawText(testMessage, 34, 8, 8, 0, SSD1306SlaveAddressWriteMode, &hi2c1);
-//	}
+	if(programStateChanging == 1) {
+		eraseScreen(SSD1306SlaveAddressWriteMode, &hi2c1);
+		programStateChanging = 0;
+		i = 0;
+	}
 
-	HAL_Delay(100);
+	HAL_Delay(200);
   }
   /* USER CODE END 3 */
 }
@@ -323,8 +318,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIOPin) {
 		return;
 	}
 
-	eraseScreen(SSD1306SlaveAddressWriteMode, &hi2c1);
-	HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+	programStateChanging = 1;
+
 	if(programState >= maxProgramState) {
 		programState = 0;
 		return;
